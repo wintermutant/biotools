@@ -1,6 +1,8 @@
 '''
 '''
 from contextlib import redirect_stdout
+from dataclasses import dataclass
+from typing import Any
 import gzip
 import io
 import inspect
@@ -17,6 +19,19 @@ import caragols.clix
 
 MAIN_EXECUTABLE_NAME='dane' # TODO
 LOGGER = logging.getLogger('biotools.base_classes')
+
+
+@dataclass
+class Result:
+    """Standard return value for all @command methods.
+
+    The @command decorator calls self.succeeded(msg, dex=data) when running as CLI,
+    and returns data directly in both modes — so callers never need to know which
+    context they're in.
+    """
+    data: Any
+    msg: str = ""
+
 
 def get_global_cli_parameters():
     """
@@ -127,7 +142,6 @@ def command(fn_or_name=None, *, aliases: list[str] | None = None):
         def wrapper(self, *args, **kwargs):
             # Check for --help in arguments
             if '--help' in sys.argv:
-                
 
                 # Capture help output
                 help_buffer = io.StringIO()
@@ -154,7 +168,13 @@ def command(fn_or_name=None, *, aliases: list[str] | None = None):
                     self.succeeded(msg=f"Help displayed for {cmd_name} command", dex={"action": "help", "command": cmd_name})
                 return
 
-            return fn(self, *args, **kwargs)
+            result = fn(self, *args, **kwargs)
+            if isinstance(result, Result):
+                # In CLI mode, report via succeeded(); in module mode, succeeded() doesn't exist
+                if hasattr(self, 'succeeded'):
+                    self.succeeded(msg=result.msg, dex=result.data)
+                return result.data
+            return result
 
         # Copy attributes to wrapper
         wrapper.__typer_app__ = app
@@ -234,7 +254,7 @@ class BioBase(caragols.clix.App):
                 return self.file_path.with_name(f'{self.basename}-VALIDATED{self.preferred_extension}')
             return None
         return self.file_path.with_name(f'{self.basename}-VALIDATED{self.preferred_extension}')
-    
+
     # ~~~ Validation Stuff ~~~ #
     def is_known_extension(self) -> bool:
         '''
@@ -249,12 +269,12 @@ class BioBase(caragols.clix.App):
             return len(suffixes) > 1 and suffixes[-2] in self.known_extensions
         else:
             return suffixes[-1] in self.known_extensions
-    
+
     def is_valid(self) -> bool:
         if self.file_path is None:
             # Return True for --help mode to avoid validation issues
             return True
-        
+
         if not self.file_path.exists():
             LOGGER.debug('File does not exist: %s', self.file_path)
             return False
@@ -274,7 +294,7 @@ class BioBase(caragols.clix.App):
         else:
             LOGGER.debug('File is compressed but in an unknown format: %s', encoding)
             return False
-    
+
     def file_not_valid_report(self):
         '''default report when file is not valid'''
         message = 'File is not valid according to validation'
@@ -287,11 +307,9 @@ class BioBase(caragols.clix.App):
             sys.exit(1)
         else:
             sys.exit(0)
-    
+
     @command
     def do_valid(self):
         '''Check to see if the file is valid, meaning it has been parsed and the contents are correct'''
-        response = self.valid
-        self.succeeded(
-            msg=f"File was scrubbed and found to be {response}", dex=response)
-        return 0
+        data = self.valid
+        return Result(data=data, msg=f"File was scrubbed and found to be {data}")
