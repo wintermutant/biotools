@@ -1,0 +1,31 @@
+# https://setuptools.pypa.io/en/latest/userguide/quickstart.html
+[build-system]
+requires = ["setuptools>=65.5.0"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "biotools"
+authors = [
+    {name = "Dane Deemer", email = "dane@liminalbios.com"},
+]
+description = "Bioinformatics file processing tools"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.9",
+    # caragols is a local sibling package — install separately with:
+    #   pip install -e ../caragols
+    # "caragols",
+]
+
+dynamic = ["version", "readme"]
+
+[project.scripts]
+biotools = "biotools.main:cli"
+
+[project.urls]
+Repository = "https://github.com/wintermutant/biotools"
+
+[tool.setuptools.dynamic]
+readme = {file = ["README.md"]}
+version = {attr = "biotools.__version__"}
