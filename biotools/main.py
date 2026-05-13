@@ -43,7 +43,7 @@ def cli():
     if type_ and MatchedClass:
         print(f'Matched')
         LOGGER.info('Matched!')
-        data = MatchedClass()
+        data = MatchedClass(run_mode='cli')
         print(f'Inited class')
         if not data.valid:
             print(f'Data not valid...')
