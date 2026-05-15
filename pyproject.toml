@@ -20,6 +20,12 @@ dependencies = [
 
 dynamic = ["version", "readme"]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+]
+
 [project.scripts]
 biotools = "biotools.main:cli"
 
