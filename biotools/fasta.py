@@ -3,7 +3,7 @@ Module for all things fasta
 '''
 import gzip
 import logging
-
+from dataclasses import dataclass
 import pathlib
 import sys
 
@@ -36,6 +36,10 @@ LOGGER = logging.getLogger('biotools.fasta')
 #     logs: list[str]
 #     notes: str
 
+@dataclass
+class FastaRecord:
+    header: str
+    sequence: str
 
 
 class Fasta(BaseInputProcessor):
@@ -79,9 +83,7 @@ class Fasta(BaseInputProcessor):
             sys.exit('Error: When running in module mode, a file must be provided')
 
         # ------------------------------- Custom stuff ------------------------------- #
-        self.fasta_key: dict[int, tuple[str, str]] = {}  #TODO change this to a generic
-                                # eventually each class can have a data model with a generic
-                                # name and point to a Pydantic model
+        self.data_key: dict[int, FastaRecord] = {}
         self.written_output = []
 
         # --------------------------- Filename and Content Validation stuff --------------------------- #
@@ -121,7 +123,7 @@ class Fasta(BaseInputProcessor):
                 current_seq = ''
                 if prev_header:
                     LOGGER.error('2 headers in a row')
-                    self.fasta_key = {}
+                    self.data_key = {}
                     return False
                 prev_header = True
                 line = next(open_file)
@@ -136,11 +138,18 @@ class Fasta(BaseInputProcessor):
                             line = next(open_file).strip()
                         except StopIteration:
                             line = None
-                self.fasta_key[cnt] = (self.clean_header(current_header), current_seq.upper())
+                #TODO: maybe add the model from biomodels.fasta?
+                self.data_key[cnt] = FastaRecord(
+                    header=self.clean_header(current_header),
+                    sequence=current_seq.upper()
+                )
+                # self.fasta_key[cnt] = (self.clean_header(current_header), current_seq.upper())
 
                 prev_header = False
 
         return True
+    
+
 
     # Database stuff
     # TODO --> this is our interface, or parser, from file to entry (row)
@@ -214,12 +223,12 @@ class Fasta(BaseInputProcessor):
         output = pathlib.Path(output)
         if output.suffix in ['.gz', '.gzip']:
             with gzip.open(str(self.preferred_file_path), 'wt') as open_file:
-                for _, value in self.fasta_key.items():
-                    open_file.write(f'>{value[0]}\n{value[1]}\n')
+                for _, record in self.data_key.items():
+                    open_file.write(f'>{record.header}\n{record.sequence}\n')
         else:
             with open(str(output), 'w', encoding='utf-8') as open_file:
-                for _, value in self.fasta_key.items():
-                    open_file.write(f'>{value[0]}\n{value[1]}\n')
+                for _, record in self.data_key.items():
+                    open_file.write(f'>{record.header}\n{record.sequence}\n')
 
         return Result(data=str(output), msg=f"Wrote output file to {output}")
 
@@ -237,19 +246,18 @@ class Fasta(BaseInputProcessor):
 
         if output.suffix in ['.gz', '.gzip']:
             with gzip.open(str(output), 'wt') as open_file:
-                for _, value in self.fasta_key.items():
-                    open_file.write(f'{value[0]},{value[1]}\n')
+                for _, record in self.data_key.items():
+                    open_file.write(f'{record.header},{record.sequence}\n')
         else:
             with open(str(output), 'w') as open_file:
-                for key, value in self.fasta_key.items():
-                    open_file.write(f'{value[0]},{value[1]}\n')
+                for _, record in self.data_key.items():
+                    open_file.write(f'{record.header},{record.sequence}\n')
         return Result(data=str(output), msg=f"Wrote output file to {output}")
 
     @command
     def do_write_binid(self, output: str | None = None, **kwargs):
         # TODO: Change the name of this
         '''Create a bin ID file from the fasta file in the form: header,filename\n'''
-        print(f'HIYAAAAAABOYY')
         output = self.conf.get('output', None)
         if not output:
             output = self.file_path.with_name(f'{self.basename}-BinID.txt.gz')
@@ -257,12 +265,12 @@ class Fasta(BaseInputProcessor):
 
         if output.suffix in ['.gz', '.gzip']:
             with gzip.open(str(output), 'wt') as open_file:
-                for _, value in self.fasta_key.items():
-                    open_file.write(f'{value[0]},{self.file_name}\n')
+                for _, record in self.data_key.items():
+                    open_file.write(f'{record.header},{self.file_name}\n')
         else:
             with open(str(output), 'w') as open_file:
-                for _, value in self.fasta_key.items():
-                    open_file.write(f'{value[0]},{self.file_name}\n')
+                for _, record in self.data_key.items():
+                    open_file.write(f'{record.header},{self.file_name}\n')
         return Result(data=str(output), msg=f"Wrote the binID file to {output}")
 
     # ~~~ Common Properties ~~~ #
@@ -281,13 +289,13 @@ class Fasta(BaseInputProcessor):
     @command
     def do_all_headers(self, **kwargs):
         '''Return all headers to standard out'''
-        data = [v[0] for k, v in self.fasta_key.items()]
+        data = [v.header for v in self.data_key.values()]
         return Result(data=data, msg=f"All headers:\n{data}")
 
     @command
     def do_all_seqs(self, **kwargs):
         '''Return all sequences to standard out'''
-        data = [v[1] for k, v in self.fasta_key.items()]
+        data = [v.sequence for v in self.data_key.values()]
         return Result(data=data, msg=f"All sequences:\n{data}")
 
     @command
@@ -295,21 +303,19 @@ class Fasta(BaseInputProcessor):
         '''Return the GC content of each sequence in the fasta file'''
         precision = 2
         gc_content = {}
-        for cnt, items in self.fasta_key.items():
-            seq = items[1].upper()
-            gc_count = seq.count('G') + seq.count('C')
-            percent = round(gc_count / len(seq), precision)
-            gc_content[cnt] = (items[0], percent)
+        for cnt, record in self.data_key.items():
+            gc_count = record.sequence.count('G') + record.sequence.count('C')
+            percent = round(gc_count / len(record.sequence), precision)
+            gc_content[cnt] = (record.header, percent)
         return Result(data=gc_content, msg=f"GC Content per entry:\n{gc_content}")
 
     @command
     def do_gc_content_total(self, precision: int = 2, **kwargs):
         '''Return the average GC content across all sequences in the fasta file'''
         values = []
-        for _, items in self.fasta_key.items():
-            seq = items[1].upper()
-            gc_count = seq.count('G') + seq.count('C')
-            gc_content = (gc_count / len(seq)) * 100 if len(seq) > 0 else 0
+        for record in self.data_key.values():
+            gc_count = record.sequence.count('G') + record.sequence.count('C')
+            gc_content = (gc_count / len(record.sequence)) * 100 if record.sequence else 0
             values.append(round(gc_content, precision))
         data = round(sum(values) / len(values), precision) if values else 0
         return Result(data=data, msg=f"Total GC Content: {data}")
@@ -317,13 +323,13 @@ class Fasta(BaseInputProcessor):
     @command
     def do_total_seqs(self, **kwargs) -> int | None:
         '''Return the total number of sequences (entries) in the fasta file.'''
-        data = len(self.fasta_key.keys())
+        data = len(self.data_key)
         return Result(data=data, msg=f"Total sequences: {data}")
 
     @command
     def do_total_seq_length(self, **kwargs):
         '''Return the total length of all sequences in the fasta file'''
-        data = sum(len(v[1]) for v in self.fasta_key.values())
+        data = sum(len(v.sequence) for v in self.data_key.values())
         return Result(data=data, msg=f"Total sequence length: {data}")
 
     @command
@@ -340,10 +346,9 @@ class Fasta(BaseInputProcessor):
             output = self.file_path.with_name(f'{self.basename}-FILTERED-{seqlength}bp.txt')
 
         with open(output, 'wt', encoding="utf-8") as open_file:
-            for cnt, items in self.fasta_key.items():
-                if len(items[1]) > seqlength:
-                    writeline = f'>{items[0]}\n{items[1]}\n'
-                    open_file.write(writeline)
+            for record in self.data_key.values():
+                if len(record.sequence) > seqlength:
+                    open_file.write(f'>{record.header}\n{record.sequence}\n')
         data = {'seqlength': seqlength, 'output': str(output), 'action': 'filter_seqlength'}
         return Result(data=data, msg=f'Processed with seqlength of {seqlength} and wrote to output: {output}')
 
@@ -364,18 +369,17 @@ class Fasta(BaseInputProcessor):
 
         sorted_values = self.sorted_fasta
         with open(output, 'wt', encoding="utf-8") as open_file:
-            for count, (index, (header, seq)) in enumerate(sorted_values.items()):
+            for count, (_, record) in enumerate(sorted_values.items()):
                 if count >= n:
                     break
-                writeline = f'>{header}\n{seq}\n'
-                open_file.write(writeline)
+                open_file.write(f'>{record.header}\n{record.sequence}\n')
         data = {'n': n, 'output': str(output)}
         return Result(data=data, msg=f'Wrote {n} largest sequences to {output}')
 
     @command
     def do_seq_length(self, **kwargs):
         '''Return the length of a specific sequence'''
-        data = {(k, v[0]): len(v[1]) for k, v in self.fasta_key.items()}
+        data = {(k, v.header): len(v.sequence) for k, v in self.data_key.items()}
         return Result(data=data, msg=f"Sequence lengths: {data}")
 
     @command
@@ -389,17 +393,17 @@ class Fasta(BaseInputProcessor):
         if not subsequence:
             self.failed(msg='No subsequence provided. Please use subsequence: <subsequence>')
             return None
-        results = {k: v for k, v in self.fasta_key.items() if subsequence in v[1]}
+        results = {k: v for k, v in self.data_key.items() if subsequence in v.sequence}
         return Result(data=results, msg=f"The following entries contained the subsequence:\n{results}")
 
     @command
     def do_basic_stats(self, **kwargs):
         '''Return basic statistics of the fasta file'''
-        total_seqs = len(self.fasta_key)
-        total_length = sum(len(v[1]) for v in self.fasta_key.values())
+        total_seqs = len(self.data_key)
+        total_length = sum(len(v.sequence) for v in self.data_key.values())
         values = [
-            (sum(seq.count(c) for c in 'GC') / len(seq)) * 100
-            for _, (_, seq) in self.fasta_key.items() if len(seq) > 0
+            (sum(r.sequence.count(c) for c in 'GC') / len(r.sequence)) * 100
+            for r in self.data_key.values() if r.sequence
         ]
         avg_gc = round(sum(values) / len(values), 2) if values else 0
         data = {
@@ -412,6 +416,8 @@ class Fasta(BaseInputProcessor):
     @property
     def sorted_fasta(self):
         ascending = self.conf.get('ascending', False)
-        if not ascending:
-            return dict(sorted(self.fasta_key.items(), key=lambda item: item[1][0].lower()))
-        return dict(sorted(self.fasta_key.items(), key=lambda item: item[1][0].lower()), reverse=True)
+        return dict(sorted(
+            self.data_key.items(),
+            key=lambda item: item[1].header.lower(),
+            reverse=not ascending
+        ))
