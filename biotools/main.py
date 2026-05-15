@@ -39,14 +39,11 @@ def cli():
     config_logging_for_app(app_name='biotools')
     type_ = find_file_type(sys.argv)
     MatchedClass = match_type_to_class(type_)
-    print(f'Type found!')
+    LOGGER.info('Type found: %s', type_)
     if type_ and MatchedClass:
-        print(f'Matched')
         LOGGER.info('Matched!')
         data = MatchedClass(run_mode='cli')
-        print(f'Inited class')
         if not data.valid:
-            print(f'Data not valid...')
             LOGGER.debug('Data provided failed validation test')
             sys.exit('Invalid return of data.valid')
         data.run()
