@@ -11,11 +11,11 @@ import typer
 
 # from pydantic_sqlite import DataBase
 
-# from bioinformatics_tools.file_classes.base_classes import BioBase, command
+# from bioinformatics_tools.file_classes.base_classes import BaseInputProcessor, command
 
 from typing import Literal
 
-from biotools.base_classes import BioBase, Result, command
+from biotools.base_classes import BaseInputProcessor, Result, command
 
 LOGGER = logging.getLogger('biotools.fasta')
 
@@ -38,7 +38,7 @@ LOGGER = logging.getLogger('biotools.fasta')
 
 
 
-class Fasta(BioBase):
+class Fasta(BaseInputProcessor):
     '''Class that takes in 1 or more Fasta entries through either:
     a file, stream, or memory (dictionary or Python variable)
     The content of the fasta file will be stored in memory in this class through the
@@ -59,9 +59,8 @@ class Fasta(BioBase):
     the summary in 1 step and utilizing the db's functionality, versus 1) retrieving and then 2)
     creating the summary from all the data that would be in memory.
     '''
-    # known_extensions = ['.fna', '.fasta', '.fa']
-    # known_compressions = ['.gz', '.gzip']
-    # preferred_extension = '.fasta.gz'
+    known_extensions = ['.fna', '.fasta', '.fa']
+    preferred_extension = '.fasta.gz'
 
     available_rules = ['rule_a', 'rule_b', 'rule_d']
     outputs = ['-SIMPLIFIED.fasta', ]
@@ -71,16 +70,13 @@ class Fasta(BioBase):
         if self.run_mode == 'cli':
             super().__init__(detect_mode=detect_mode, run_mode=run_mode, filetype='fasta')
         elif self.run_mode == 'module' and self.file:
+            super().__init__(run_mode=run_mode)
             LOGGER.debug('Not running in cli mode')
             self.file_path = pathlib.Path(self.file)
             self.file_name = self.file_path.name
         else:
             LOGGER.warning('No file detected, triggering sys.exit within module...')
             sys.exit('Error: When running in module mode, a file must be provided')
-
-        # --------------------------- Class-specific stuff --------------------------- #
-        self.known_extensions.extend(['.fna', '.fasta', '.fa'])
-        self.preferred_extension = '.fasta.gz'
 
         # ------------------------------- Custom stuff ------------------------------- #
         self.fasta_key: dict[int, tuple[str, str]] = {}  #TODO change this to a generic
@@ -89,7 +85,8 @@ class Fasta(BioBase):
         self.written_output = []
 
         # --------------------------- Filename and Content Validation stuff --------------------------- #
-        self.preferred_file_path = self.clean_file_name()
+        self.basename = self._compute_basename()
+        self.preferred_file_path = self.std_filename()
         self.valid_extension = self.is_known_extension()
         self.valid = self.is_valid()
 
@@ -162,43 +159,43 @@ class Fasta(BioBase):
     #         notes=notes
     #     )
 
-    @command
-    def do_write_db(self, **kwargs):
-        '''Write the fasta records to a sqlite database
-        2 Steps (third for consideration?):
-        1) Write the contents for the database
-        2) Add in the log information
-        3)? Copy in the configuration?
-        '''
-        db_path = self.conf.get('fasta.write_db.db_path', f'fasta_records-{self.timestamp}.db')
-        db = DataBase(db_path)
+    # @command
+    # def do_write_db(self, **kwargs):
+    #     '''Write the fasta records to a sqlite database
+    #     2 Steps (third for consideration?):
+    #     1) Write the contents for the database
+    #     2) Add in the log information
+    #     3)? Copy in the configuration?
+    #     '''
+    #     db_path = self.conf.get('fasta.write_db.db_path', f'fasta_records-{self.timestamp}.db')
+    #     db = DataBase(db_path)
 
-        # Write fasta records
-        records = self.to_pydantic()
-        for record in records:
-            db.add('fasta_records', record)
+    #     # Write fasta records
+    #     records = self.to_pydantic()
+    #     for record in records:
+    #         db.add('fasta_records', record)
 
-        # Write session logs
-        notes = self.conf.get('notes', '')
-        log_record = self.logs_to_pydantics(notes=notes)
-        db.add('logs', log_record)
+    #     # Write session logs
+    #     notes = self.conf.get('notes', '')
+    #     log_record = self.logs_to_pydantics(notes=notes)
+    #     db.add('logs', log_record)
 
-        data = {'records': len(records), 'logs': len(log_record.logs), 'db_path': db_path}
-        return Result(data=data, msg=f"{len(records)} records and {len(log_record.logs)} log entries written to database at {db_path}")
+    #     data = {'records': len(records), 'logs': len(log_record.logs), 'db_path': db_path}
+    #     return Result(data=data, msg=f"{len(records)} records and {len(log_record.logs)} log entries written to database at {db_path}")
 
-    @command
-    def do_add_to_db(self, db_path: str = typer.Option(None),  **kwargs):
-        '''Add the fasta records to an existing sqlite database'''
-        db_path = self.conf.get('fasta.add_to_db.db_path', None)
-        if not db_path:
-            self.failed(msg='No db_path provided. Please use db_path: <path_to_db>')
-            return None
-        db = DataBase(db_path)
-        records = self.to_pydantic()
-        for record in records:
-            db.add('fasta_records', record)
-        data = {'records': len(records), 'db_path': db_path}
-        return Result(data=data, msg=f"{len(records)} records added to database at {db_path}")
+    # @command
+    # def do_add_to_db(self, db_path: str = typer.Option(None),  **kwargs):
+    #     '''Add the fasta records to an existing sqlite database'''
+    #     db_path = self.conf.get('fasta.add_to_db.db_path', None)
+    #     if not db_path:
+    #         self.failed(msg='No db_path provided. Please use db_path: <path_to_db>')
+    #         return None
+    #     db = DataBase(db_path)
+    #     records = self.to_pydantic()
+    #     for record in records:
+    #         db.add('fasta_records', record)
+    #     data = {'records': len(records), 'db_path': db_path}
+    #     return Result(data=data, msg=f"{len(records)} records added to database at {db_path}")
 
     # ~~~ Rewriting ~~~ #
     @command
@@ -249,9 +246,10 @@ class Fasta(BioBase):
         return Result(data=str(output), msg=f"Wrote output file to {output}")
 
     @command
-    def do_write_binid(self, **kwargs):
+    def do_write_binid(self, output: str | None = None, **kwargs):
         # TODO: Change the name of this
         '''Create a bin ID file from the fasta file in the form: header,filename\n'''
+        print(f'HIYAAAAAABOYY')
         output = self.conf.get('output', None)
         if not output:
             output = self.file_path.with_name(f'{self.basename}-BinID.txt.gz')
