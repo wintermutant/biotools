@@ -15,9 +15,10 @@ import sys
 import typer
 
 import caragols.clix
+import caragols.condo
 
 
-MAIN_EXECUTABLE_NAME='dane' # TODO
+MAIN_EXECUTABLE_NAME='biotools'
 LOGGER = logging.getLogger('biotools.base_classes')
 
 
@@ -168,6 +169,9 @@ def command(fn_or_name=None, *, aliases: list[str] | None = None):
                     self.succeeded(msg=f"Help displayed for {cmd_name} command", dex={"action": "help", "command": cmd_name})
                 return
 
+            if hasattr(self, 'conf') and kwargs:
+                self.conf.update(kwargs)
+
             result = fn(self, *args, **kwargs)
             if isinstance(result, Result):
                 # In CLI mode, report via succeeded(); in module mode, succeeded() doesn't exist
@@ -191,7 +195,7 @@ def command(fn_or_name=None, *, aliases: list[str] | None = None):
 
     return deco
 
-class BioBase(caragols.clix.App):
+class BaseInputProcessor(caragols.clix.App):
     '''
     Base class for all file classes. This is more about shared methods versus initialization
     '''
@@ -199,60 +203,50 @@ class BioBase(caragols.clix.App):
     known_compressions = ['.gz', '.gzip']
     known_extensions = []
 
-    def __init__(self, detect_mode="medium", run_mode='cli', filetype=None) -> None:
+    def __init__(self, detect_mode="medium", run_mode='module', filetype=None) -> None:
         self.detect_mode = detect_mode
 
-        # ------------------------ Running base clix.App init ------------------------ #
+        if run_mode == 'module':
+            self.conf = caragols.condo.Condex()
+            if self.default_config_path.exists():
+                self.conf.load(self.default_config_path)
+            return
+
+        # _setup_file() is called automatically via on_cli_ready() → _setup_cli()
         super().__init__(run_mode=run_mode, name=MAIN_EXECUTABLE_NAME, filetype=filetype)
+
+    def _setup_file(self):
+        '''Resolve the file argument from conf and set file_path and file_name.'''
         self.file = self.conf.get('file', None)
-
-        # TODO: Don't like returns nested in here
-        if not self.matched_dispatch:
-            LOGGER.info('%s \n', self.report.formatted(self.conf.get('report.form')))
-            self.done()
-            #TODO: sys.exit should be replaced with a report.
-            if self.report.status.indicates_failure:
-                sys.exit(1)
-            else:
-                sys.exit(0)
-
-        # Check for --help before file validation: skip validation if so
-        if '--help' in sys.argv:
-            self.file_path = None
-            self.file_name = None
-        elif 'help' in self.matched_dispatch.tokens[0]:  # If just running help, don't need to do anything
-            self.run()
-        elif self.file:
+        if self.file:
             self.file_path = pathlib.Path(self.file)
             self.file_name = self.file_path.name
-        else:  #TODO: Case when type: generate and no file provided, it should be okay
-            message = 'ERROR: No file provided. Please add file via: $ dane file: example.fasta'
-            self.failed(msg=f"{message}", dex=message)
-            LOGGER.info('%s \n', self.report.formatted(self.form))
-            self.done()
-            if self.report.status.indicates_failure:
-                sys.exit(1)
-            else:
-                sys.exit(0)
-        # SessionLogger.log_header_section(LOGGER, 'Finished Biobase Init') #TODO
+        else:
+            message = f'ERROR: No file provided. Please add file via: $ {self.name} file: example.{self.filetype}'
+            self.failed(msg=message, dex=message)
+            LOGGER.info('%s \n', self.report.formatted(self.conf.get('report.form', 'prose')))
+            self._exit_on_report()
 
-    def clean_file_name(self) -> pathlib.Path | None:
-        '''
-        e.g. for standard file suffix - always want our fastq file to end in .fastq.gz.
-        For example, if a file comes in as myfile.fg, it'll be renamed to myfile.fastq.gz
-        Or, if a file is fastq.txt, it'll be renamed to myfile.fastq.gz
+    def _compute_basename(self) -> str | None:
+        '''Strip known compressions and extensions from file_path, replace dots with underscores.'''
+        if self.file_path is None:
+            return None
+        inner = self.file_path
+        if inner.suffix in self.known_compressions:
+            inner = pathlib.Path(inner.stem)
+        if inner.suffix in self.known_extensions:
+            inner = pathlib.Path(inner.stem)
+        return inner.name.replace('.', '_')
+
+    def std_filename(self) -> pathlib.Path | None:
+        '''Compute the canonical output path for this file.
+
+        Always returns {basename}-VALIDATED{preferred_extension}. Returns None
+        in --help mode.
         '''
         if self.file_path is None:
-            # Return a dummy value for --help mode
-            return pathlib.Path("dummy-filename.txt")
-
-        suffixes = self.file_path.suffixes
-        self.basename = self.file_path.stem
-        if suffixes and suffixes[-1] in self.known_compressions:
-            if len(suffixes) > 1 and suffixes[-2] in self.known_extensions:
-                self.basename = pathlib.Path(self.basename).stem
-                return self.file_path.with_name(f'{self.basename}-VALIDATED{self.preferred_extension}')
             return None
+
         return self.file_path.with_name(f'{self.basename}-VALIDATED{self.preferred_extension}')
 
     # ~~~ Validation Stuff ~~~ #
