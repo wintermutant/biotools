@@ -50,21 +50,21 @@ class TestFastaValidation:
 class TestFastaKey:
     def test_entry_count(self, valid_fasta):
         f = make_fasta(valid_fasta)
-        assert len(f.fasta_key) == 3
+        assert len(f.data_key) == 3
 
     def test_header_stored_correctly(self, valid_fasta):
         f = make_fasta(valid_fasta)
-        headers = [v[0] for v in f.fasta_key.values()]
+        headers = [r.header for r in f.data_key.values()]
         assert 'seq1_first_sequence' in headers
 
     def test_sequence_stored_uppercase(self, valid_fasta):
         f = make_fasta(valid_fasta)
-        for _, (header, seq) in f.fasta_key.items():
-            assert seq == seq.upper()
+        for record in f.data_key.values():
+            assert record.sequence == record.sequence.upper()
 
     def test_fasta_key_empty_on_invalid(self, invalid_fasta_bad_chars):
         f = make_fasta(invalid_fasta_bad_chars)
-        assert f.fasta_key == {}
+        assert f.data_key == {}
 
 
 class TestFastaMethods:
