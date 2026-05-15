@@ -55,13 +55,13 @@ def cli():
         print('Not type match!')
         if any(arg.lower() in sys.argv for arg in ('help')):
             LOGGER.info('🆘 Help requested')
-            LOGGER.info('The following file types are recognized and can be specified via the command line\n\033[92mdane type: <file_type>\033[0m')
+            LOGGER.info('The following file types are recognized and can be specified via the command line\n\033[92mbiotools type: <file_type>\033[0m')
             help_string = 'Available file types:\n'
             for type_identifier in CLASS_MAPPER:
                 help_string += f'{type_identifier[0]}\n'
             LOGGER.info(help_string)
             sys.exit('Exited without a report do to main help message')
-        LOGGER.error('No file type provided. Please specify via the command line\ndane type: <file_type>\nExiting...')
+        LOGGER.error('No file type provided. Please specify via the command line\nbiotools type: <file_type>\nExiting...')
         sys.exit('Exited without a report due to no file type')
 
 
