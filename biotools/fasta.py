@@ -6,35 +6,14 @@ import logging
 from dataclasses import dataclass
 import pathlib
 import sys
+from typing import Literal
 
 import typer
-
-# from pydantic_sqlite import DataBase
-
-# from bioinformatics_tools.file_classes.base_classes import BaseInputProcessor, command
-
-from typing import Literal
 
 from biotools.base_classes import BaseInputProcessor, Result, command
 
 LOGGER = logging.getLogger('biotools.fasta')
 
-#TODO: Below, have from biomodels import FastaRecord
-# class FastaRecord(BaseModel):
-#     '''Class representing a single FASTA record'''
-#     uuid: UUID = Field(default_factory=uuid4, alias='uuid')
-#     filename: str
-#     description: str
-#     sequence: str
-
-
-# class DbLogRecord(BaseModel):
-#     '''Additional mandatory log information that gets written as a table into the database'''
-#     uuid: UUID = Field(default_factory=uuid4, alias='uuid')
-#     file_name: str
-#     file_path_original: str
-#     logs: list[str]
-#     notes: str
 
 @dataclass
 class FastaRecord:
@@ -45,6 +24,7 @@ class FastaRecord:
 class Fasta(BaseInputProcessor):
     '''Class that takes in 1 or more Fasta entries through either:
     a file, stream, or memory (dictionary or Python variable)
+    # TODO: allow a dictionary or stream instead of just a file
     The content of the fasta file will be stored in memory in this class through the
     fasta_key variable. This fasta_key is the interface from the Fasta class holding
     the data to the biomodels.fasta model, which then interfaces with the database
@@ -66,10 +46,10 @@ class Fasta(BaseInputProcessor):
     known_extensions = ['.fna', '.fasta', '.fa']
     preferred_extension = '.fasta.gz'
 
-    available_rules = ['rule_a', 'rule_b', 'rule_d']
-    outputs = ['-SIMPLIFIED.fasta', ]
-
-    def __init__(self, file=None, detect_mode="medium", run_mode: 'Literal["module", "cli"]' = 'module') -> None:
+    def __init__(
+            self, file=None, detect_mode="medium",
+            run_mode: 'Literal["module", "cli"]' = 'module'
+            ) -> None:
         self.file, self.detect_mode, self.run_mode = file, detect_mode, run_mode
         if self.run_mode == 'cli':
             super().__init__(detect_mode=detect_mode, run_mode=run_mode, filetype='fasta')
@@ -86,7 +66,7 @@ class Fasta(BaseInputProcessor):
         self.data_key: dict[int, FastaRecord] = {}
         self.written_output = []
 
-        # --------------------------- Filename and Content Validation stuff --------------------------- #
+        # --------------------------- Filename and Content Validation stuff ---------- #
         self.basename = self._compute_basename()
         self.preferred_file_path = self.std_filename()
         self.valid_extension = self.is_known_extension()
@@ -150,61 +130,34 @@ class Fasta(BaseInputProcessor):
         return True
     
 
+    def _to_db_model(self, data_key, db_model):  # -> list[FastaDbModel]
+        """Convert data_key entries to a list of db_model instances."""
+        #TODO this may be better abstracted and added to BaseInputProcessor. For now, it doesnt need to be abstracted
+        return [
+            db_model(header=record.header, sequence=record.sequence, source_file=self.file_name)
+            for record in data_key.values()
+        ]
 
-    # Database stuff
-    # TODO --> this is our interface, or parser, from file to entry (row)
-    # def to_pydantic(self) -> list[FastaRecord]:
-    #     '''Turn the fasta file into a valid pydanic model
-    #     TODO: Add a checksum sometime'''
-    #     LOGGER.info('Filename: %s Filepath: %s full path: %s', self.file_name, self.file_path, self.file_path.resolve())
-    #     return [FastaRecord(filename=self.file_name, description=header, sequence=seq) for header, seq in self.fasta_key.values()]
+    @command
+    def do_db(self, **kwargs):
+        '''Write fasta records to the configured database
+        TODO: Add a db entry for log information that goes along with the row entry
+        TODO: Add a 'note' section for adding notes
+        '''
+        from biomodels.app import create_db_and_tables
+        from biomodels.db_connectors import db_connection
+        from biomodels.db_connectors.fasta import ingest_fasta_records
 
-    # def logs_to_pydantics(self, notes: str = '') -> DbLogRecord:
-    #     '''Convert session logs to a DbLogRecord for database insertion'''
-    #     return DbLogRecord(
-    #         file_name=self.file_name,
-    #         file_path_original=str(self.file_path.resolve()),
-    #         logs=self.log_handler.log_records,
-    #         notes=notes
-    #     )
+        if not db_connection():
+            LOGGER.warning('No db_connection...')
+            return Result(data=None, msg="DB connection failed — check BIOMODELS_DB_CONNECTION in .env")
 
-    # @command
-    # def do_write_db(self, **kwargs):
-    #     '''Write the fasta records to a sqlite database
-    #     2 Steps (third for consideration?):
-    #     1) Write the contents for the database
-    #     2) Add in the log information
-    #     3)? Copy in the configuration?
-    #     '''
-    #     db_path = self.conf.get('fasta.write_db.db_path', f'fasta_records-{self.timestamp}.db')
-    #     db = DataBase(db_path)
-
-    #     # Write fasta records
-    #     records = self.to_pydantic()
-    #     for record in records:
-    #         db.add('fasta_records', record)
-
-    #     # Write session logs
-    #     notes = self.conf.get('notes', '')
-    #     log_record = self.logs_to_pydantics(notes=notes)
-    #     db.add('logs', log_record)
-
-    #     data = {'records': len(records), 'logs': len(log_record.logs), 'db_path': db_path}
-    #     return Result(data=data, msg=f"{len(records)} records and {len(log_record.logs)} log entries written to database at {db_path}")
-
-    # @command
-    # def do_add_to_db(self, db_path: str = typer.Option(None),  **kwargs):
-    #     '''Add the fasta records to an existing sqlite database'''
-    #     db_path = self.conf.get('fasta.add_to_db.db_path', None)
-    #     if not db_path:
-    #         self.failed(msg='No db_path provided. Please use db_path: <path_to_db>')
-    #         return None
-    #     db = DataBase(db_path)
-    #     records = self.to_pydantic()
-    #     for record in records:
-    #         db.add('fasta_records', record)
-    #     data = {'records': len(records), 'db_path': db_path}
-    #     return Result(data=data, msg=f"{len(records)} records added to database at {db_path}")
+        create_db_and_tables()
+        LOGGER.info('Getting read to ingest...')
+        reserved = {'file', 'type', 'report.form'}
+        metadata = {str(k): self.conf[k] for k in self.conf.allKeys if str(k) not in reserved} or None
+        summary = ingest_fasta_records(filename=self.file_name, data_key=self.data_key, file_metadata=metadata)
+        return Result(data=summary, msg=f"Ingested {summary['entries']} entries from {self.file_name} ({summary['sequences_created']} new sequences, {summary['sequences_reused']} reused)")
 
     # ~~~ Rewriting ~~~ #
     @command
